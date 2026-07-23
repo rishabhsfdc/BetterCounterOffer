@@ -1,4 +1,6 @@
-﻿using UnityEngine;
+using System;
+using System.Collections.Generic;
+using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.Events;
@@ -23,12 +25,12 @@ namespace BetterCounterOffer
 
         public void SetBgColor(Color newColor)
         {
-            this.background.color = newColor;
+            if (this.background != null) this.background.color = newColor;
         }
 
         public void SetTextColor(Color newColor)
         {
-            this.buttonText.color = newColor;
+            if (this.buttonText != null) this.buttonText.color = newColor;
         }
     }
 
@@ -37,19 +39,18 @@ namespace BetterCounterOffer
         public Dictionary<string, Tab> allTabs = new Dictionary<string, Tab>();
         public Tab selectedTab = null;
 
-        // Used to prevent quick switching between tabs.
-        public float clickBuffer = 0.7f;
+        public float clickBuffer = 0.3f;
         public float prevTime = 0;
 
         public GameObject filterbuttons;
         public Transform parent;
         public Font font;
 
-        public Color textActive = new Color(0.961f, 0.961f, 0.961f);
-        public Color textDisabled = new Color(0.686f, 0.686f, 0.686f);
-        public Color tabIdle = new Color(0.051f, 0.286f, 0.451f);
-        public Color tabHover = new Color(0.114f, 0.353f, 0.525f);
-        public Color tabActive = new Color(0.204f, 0.522f, 0.737f);
+        public Color textActive = new Color(1f, 1f, 1f);
+        public Color textDisabled = new Color(0.85f, 0.88f, 0.92f);
+        public Color tabIdle = new Color(0.10f, 0.32f, 0.52f);
+        public Color tabHover = new Color(0.15f, 0.42f, 0.65f);
+        public Color tabActive = new Color(0.06f, 0.22f, 0.40f);
 
         public TabController(Transform parent)
         {
@@ -63,19 +64,19 @@ namespace BetterCounterOffer
             if (this.parent != null)
             {
                 filterbuttons.transform.SetParent(this.parent, false);
+                filterbuttons.transform.SetAsLastSibling();
             }
             filterbuttons.AddComponent<CanvasRenderer>();
             RectTransform containerRectTrans = filterbuttons.AddComponent<RectTransform>();
-            containerRectTrans.anchorMin = new Vector2(0, 0.5f);
-            containerRectTrans.anchorMax = new Vector2(1, 0.5f);
-            containerRectTrans.anchoredPosition = new Vector2(0f, 200);
-            containerRectTrans.sizeDelta = new Vector2(1, 60);
-            Image containerBg = filterbuttons.AddComponent<Image>();
-            containerBg.color = new Color(0.9608f, 0.9608f, 0.9608f);
+            containerRectTrans.anchorMin = new Vector2(0.5f, 1f);
+            containerRectTrans.anchorMax = new Vector2(0.5f, 1f);
+            containerRectTrans.pivot = new Vector2(0.5f, 1f);
+            containerRectTrans.anchoredPosition = new Vector2(0f, 32f);
+            containerRectTrans.sizeDelta = new Vector2(240, 28);
 
             GridLayoutGroup containerGrid = filterbuttons.AddComponent<GridLayoutGroup>();
-            containerGrid.cellSize = new Vector2(100, 45);
-            containerGrid.spacing = new Vector2(15, 0);
+            containerGrid.cellSize = new Vector2(72, 26);
+            containerGrid.spacing = new Vector2(6, 0);
             containerGrid.childAlignment = TextAnchor.MiddleCenter;
             containerGrid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
             containerGrid.constraintCount = 3;
@@ -83,27 +84,19 @@ namespace BetterCounterOffer
 
         public void AddTab(string id, string text)
         {
-            if (allTabs.ContainsKey(id))
-            {
-                throw new Exception($"The key {id} already exists in the tab list");
-            }
+            if (allTabs.ContainsKey(id)) return;
 
-            if (filterbuttons == null)
-            {
-                throw new Exception("Filter Buttons has not been initialized");
-            }
+            if (filterbuttons == null) return;
             Tab newTab = CreateNewTab(filterbuttons.transform, id, text);
             allTabs.Add(id, newTab);
         }
 
         public void SetSelected(string key)
         {
-            if (!allTabs.ContainsKey(key))
-            {
-                throw new Exception($"{key} Does Not Exist in the TabController Dictionary");
-            }
+            if (!allTabs.ContainsKey(key)) return;
+            ResetTabs();
             Tab selected = allTabs[key];
-            selectedTab = allTabs[key];
+            selectedTab = selected;
             selected.SetColor(tabActive, textActive);
         }
 
@@ -116,47 +109,44 @@ namespace BetterCounterOffer
             Image buttonImg = buttonGo.AddComponent<Image>();
             buttonImg.color = tabIdle;
 
-
             GameObject buttonTextGo = new GameObject($"{title}_Button_Text");
             buttonTextGo.transform.SetParent(buttonGo.transform, false);
             Text buttonText = buttonTextGo.AddComponent<Text>();
             buttonText.text = text;
             buttonText.font = font != null ? font : Resources.GetBuiltinResource<Font>("Arial.ttf");
-            buttonText.fontSize = 30;
+            buttonText.fontSize = 13;
             buttonText.color = textDisabled;
             buttonText.alignment = TextAnchor.MiddleCenter;
 
             var textRect = buttonTextGo.GetComponent<RectTransform>();
             textRect.pivot = new Vector2(0.5f, 0.5f);
-            textRect.sizeDelta = new Vector2(60, 40);
             textRect.anchorMin = new Vector2(0, 0);
             textRect.anchorMax = new Vector2(1, 1);
             textRect.anchoredPosition = new Vector2(0, 0);
 
-            Tab newTab = new Tab();
-            newTab.id = title;
-            newTab.button = button;
-            newTab.background = buttonImg;
-            newTab.buttonText = buttonText;
+            Tab newTab = new Tab
+            {
+                id = title,
+                button = button,
+                background = buttonImg,
+                buttonText = buttonText
+            };
 
-            EventTrigger.Entry eventEntryEnter = new EventTrigger.Entry();
-            eventEntryEnter.eventID = EventTriggerType.PointerEnter;
+            EventTrigger.Entry eventEntryEnter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
 #if IL2CPP
             eventEntryEnter.callback.AddListener(DelegateSupport.ConvertDelegate<UnityAction<BaseEventData>>((BaseEventData eventData) => HandleButtonEnter(newTab)));
 #elif MONO
             eventEntryEnter.callback.AddListener((BaseEventData eventData) => HandleButtonEnter(newTab));
 #endif
 
-            EventTrigger.Entry eventEntryExit = new EventTrigger.Entry();
-            eventEntryExit.eventID = EventTriggerType.PointerExit;
+            EventTrigger.Entry eventEntryExit = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
 #if IL2CPP
             eventEntryExit.callback.AddListener(DelegateSupport.ConvertDelegate<UnityAction<BaseEventData>>((BaseEventData eventData) => HandleButtonExit(newTab)));
 #elif MONO
-            eventEntryEnter.callback.AddListener((BaseEventData eventData) => HandleButtonExit(newTab));
+            eventEntryExit.callback.AddListener((BaseEventData eventData) => HandleButtonExit(newTab));
 #endif
 
-            EventTrigger.Entry eventEntryClick = new EventTrigger.Entry();
-            eventEntryClick.eventID = EventTriggerType.PointerClick;
+            EventTrigger.Entry eventEntryClick = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
 #if IL2CPP
             eventEntryClick.callback.AddListener(DelegateSupport.ConvertDelegate<UnityAction<BaseEventData>>((BaseEventData eventData) => HandleButtonClick(newTab)));
 #elif MONO
@@ -168,13 +158,11 @@ namespace BetterCounterOffer
             events.triggers.Add(eventEntryExit);
             events.triggers.Add(eventEntryClick);
 
-
             return newTab;
         }
 
         public void HandleButtonEnter(Tab currTab)
         {
-            ResetTabs();
             if (selectedTab != null && selectedTab == currTab) return;
             currTab.SetBgColor(tabHover);
         }
@@ -199,10 +187,16 @@ namespace BetterCounterOffer
 
         public void ResetTabs()
         {
-            foreach (KeyValuePair<string, Tab> tab in allTabs)
+            foreach (var kvp in allTabs)
             {
-                if (selectedTab != null && selectedTab == tab.Value) continue;
-                tab.Value.SetColor(tabIdle, textDisabled);
+                if (selectedTab != null && kvp.Value == selectedTab)
+                {
+                    kvp.Value.SetColor(tabActive, textActive);
+                }
+                else
+                {
+                    kvp.Value.SetColor(tabIdle, textDisabled);
+                }
             }
         }
     }

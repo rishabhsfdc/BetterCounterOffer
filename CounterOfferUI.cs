@@ -11,6 +11,7 @@ using Il2CppScheduleOne.Product;
 using Il2CppScheduleOne.Economy;
 using Il2CppScheduleOne.GameTime;
 using Il2CppScheduleOne.UI.Handover;
+using Il2CppTMPro;
 #elif MONO
 using GenericCol = System.Collections.Generic;
 using ScheduleOne;
@@ -19,6 +20,7 @@ using ScheduleOne.Product;
 using ScheduleOne.Economy;
 using ScheduleOne.GameTime;
 using ScheduleOne.UI.Handover;
+using TMPro;
 #endif
 
 namespace BetterCounterOffer
@@ -29,7 +31,10 @@ namespace BetterCounterOffer
         public static GameObject popupRef = null;
         public static GameObject productSelectorRef = null;
 
-        public static GameObject offerInfoGO = null;
+        public static GameObject initialOfferGO = null;
+        public static GameObject maxCashGO = null;
+        public static GameObject successRateGO = null;
+
         public static Text initialOfferText = null;
         public static Text successRateText = null;
         public static Text maxCashText = null;
@@ -59,8 +64,6 @@ namespace BetterCounterOffer
                 float minVal = instance.PriceSelector.MinValue;
                 float maxVal = instance.PriceSelector.MaxValue > 0 ? instance.PriceSelector.MaxValue : 9999f;
                 float clampedPrice = Mathf.Clamp(Mathf.Floor(newPrice), minVal, maxVal);
-                
-                MelonLogger.Msg($"[HighBaller Mode] Safely setting price to: ${clampedPrice}");
                 instance.PriceSelector.SetAmount(clampedPrice);
             }
             catch (Exception ex)
@@ -90,14 +93,48 @@ namespace BetterCounterOffer
                 }
             }
 
-            if (offerInfoGO == null)
+            Transform mainCardContainer = null;
+            if (instance.TitleLabel != null && instance.TitleLabel.transform.parent != null && instance.TitleLabel.transform.parent.parent != null)
             {
-                Transform targetParent = instance.transform;
-                if (instance.Container != null) targetParent = instance.Container.transform;
-
-                CreateLabels(targetParent);
-                UpdateSelectorUI(targetParent);
+                mainCardContainer = instance.TitleLabel.transform.parent.parent;
             }
+            if (mainCardContainer == null && instance.FairPriceLabel != null && instance.FairPriceLabel.transform.parent != null && instance.FairPriceLabel.transform.parent.parent != null)
+            {
+                mainCardContainer = instance.FairPriceLabel.transform.parent.parent;
+            }
+            if (mainCardContainer == null && instance.Container != null)
+            {
+                mainCardContainer = instance.Container.transform;
+            }
+            if (mainCardContainer == null) mainCardContainer = instance.transform;
+
+            CleanupExistingLabels(mainCardContainer);
+            CleanupExistingLabels(instance.transform);
+            if (instance.TitleLabel != null) CleanupExistingLabels(instance.TitleLabel.transform.parent);
+            if (instance.FairPriceLabel != null) CleanupExistingLabels(instance.FairPriceLabel.transform.parent);
+
+            CreateLabelsCloned(instance, mainCardContainer);
+            UpdateSelectorUI(instance);
+        }
+
+        private static void CleanupExistingLabels(Transform parent)
+        {
+            if (parent == null) return;
+            string[] targetNames = new string[] { "OfferInformation", "ModInitialCash", "ModMaxCash", "ModSuccessRate" };
+            foreach (string name in targetNames)
+            {
+                Transform found = parent.Find(name);
+                if (found != null)
+                {
+                    try { UnityEngine.Object.Destroy(found.gameObject); } catch { }
+                }
+            }
+            initialOfferGO = null;
+            maxCashGO = null;
+            successRateGO = null;
+            initialOfferText = null;
+            maxCashText = null;
+            successRateText = null;
         }
 
         public static void OnPopupOpen(CounterofferInterface instance)
@@ -110,6 +147,18 @@ namespace BetterCounterOffer
                 ? instance.conversation.sender.GetComponent<Customer>() 
                 : null;
 
+            // 1. Capture customer's TRUE initial offer price BEFORE HighBaller auto-fills the price box!
+            float initialPrice = 0f;
+            if (currCustomer != null && currCustomer.OfferedContractInfo != null)
+            {
+                initialPrice = currCustomer.OfferedContractInfo.Payment;
+            }
+            if (initialPrice <= 0f && instance.PriceSelector != null)
+            {
+                initialPrice = instance.PriceSelector.SelectedAmount;
+            }
+
+            // 2. HighBaller auto-fills price box with customer's spending limit
             if (currCustomer != null && instance.PriceSelector != null)
             {
                 float maxSpend = CalculateSpendingLimits(currCustomer);
@@ -119,7 +168,29 @@ namespace BetterCounterOffer
                 }
             }
 
-            float currentPrice = (instance.PriceSelector != null) ? instance.PriceSelector.SelectedAmount : 0f;
+            UpdateAllLabels(instance);
+        }
+
+        public static void UpdateAllLabels(CounterofferInterface instance)
+        {
+            if (instance == null) return;
+
+            Customer currCustomer = (instance.conversation != null && instance.conversation.sender != null) 
+                ? instance.conversation.sender.GetComponent<Customer>() 
+                : null;
+
+            float initialPrice = 0f;
+            if (currCustomer != null && currCustomer.OfferedContractInfo != null)
+            {
+                initialPrice = currCustomer.OfferedContractInfo.Payment;
+            }
+            if (initialPrice <= 0f && instance.PriceSelector != null)
+            {
+                initialPrice = instance.PriceSelector.SelectedAmount;
+            }
+
+            float maxSpend = (currCustomer != null) ? CalculateSpendingLimits(currCustomer) : 1000f;
+            float currentPrice = (instance.PriceSelector != null) ? instance.PriceSelector.SelectedAmount : initialPrice;
 
             if (!CounterOfferConfig.disableAllLabels)
             {
@@ -127,64 +198,135 @@ namespace BetterCounterOffer
                 {
                     if (CounterOfferConfig.enablePricePerUnit && instance.quantity > 0)
                     {
-                        SetInitialPriceText(currentPrice / instance.quantity, true);
+                        SetInitialPriceText(initialPrice / instance.quantity, true);
                         SetFairPriceText(currentPrice / instance.quantity);
                     }
                     else
                     {
-                        SetInitialPriceText(currentPrice);
+                        SetInitialPriceText(initialPrice);
                     }
                 }
 
-                if (!CounterOfferConfig.disableMaxLimit && currCustomer != null)
+                if (!CounterOfferConfig.disableMaxLimit)
                 {
-                    float maxSpend = CalculateSpendingLimits(currCustomer);
                     SetMaxCashText(maxSpend);
                 }
 
-                if (!CounterOfferConfig.disableSuccessRate && currCustomer != null)
+                if (!CounterOfferConfig.disableSuccessRate)
                 {
-                    float successChance = CalculateSuccessProbability(currCustomer, instance.selectedProduct, instance.quantity, currentPrice);
+                    float successChance = (currCustomer != null) 
+                        ? CalculateSuccessProbability(currCustomer, instance.selectedProduct, instance.quantity, currentPrice)
+                        : 1.0f;
                     SetSuccessRateText(successChance);
                 }
             }
         }
 
+        public static void SetLabelText(GameObject go, string textStr, Color color, bool isBold = false)
+        {
+            if (go == null) return;
+
+#if IL2CPP
+            var tmp = go.GetComponent<TextMeshProUGUI>();
+            if (tmp == null) tmp = go.GetComponentInChildren<TextMeshProUGUI>();
+            if (tmp != null)
+            {
+                tmp.enableAutoSizing = false;
+                tmp.fontSize = 16f;
+                tmp.fontSizeMin = 16f;
+                tmp.fontSizeMax = 16f;
+                tmp.text = textStr;
+                tmp.color = color;
+                tmp.alignment = TextAlignmentOptions.Center;
+                tmp.fontStyle = isBold ? FontStyles.Bold : FontStyles.Normal;
+                return;
+            }
+#elif MONO
+            var tmp = go.GetComponent<TextMeshProUGUI>();
+            if (tmp == null) tmp = go.GetComponentInChildren<TextMeshProUGUI>();
+            if (tmp != null)
+            {
+                tmp.enableAutoSizing = false;
+                tmp.fontSize = 16f;
+                tmp.fontSizeMin = 16f;
+                tmp.fontSizeMax = 16f;
+                tmp.text = textStr;
+                tmp.color = color;
+                tmp.alignment = TextAlignmentOptions.Center;
+                tmp.fontStyle = isBold ? FontStyles.Bold : FontStyles.Normal;
+                return;
+            }
+#endif
+
+            var txt = go.GetComponent<Text>();
+            if (txt == null) txt = go.GetComponentInChildren<Text>();
+            if (txt != null)
+            {
+                txt.text = textStr;
+                txt.color = color;
+                txt.fontSize = 16;
+                txt.alignment = TextAnchor.MiddleCenter;
+                txt.fontStyle = isBold ? FontStyle.Bold : FontStyle.Normal;
+            }
+        }
+
         public static void SetSuccessRateText(float success)
         {
-            if (successRateText == null) return;
-            successRateText.text = $"<b>{Mathf.RoundToInt(success * 100)}% Chance of Success</b>";
-            if (colorMap != null && colorMap.colorKeys != null && colorMap.colorKeys.Length > 0)
+            if (successRateGO == null && successRateText == null) return;
+            int pct = Mathf.RoundToInt(success * 100);
+            string text = $"{pct}% Chance of Success";
+            
+            Color textCol = new Color(0f, 0.75f, 0.15f, 1f); // Vibrant Green
+            if (pct < 40) textCol = new Color(0.85f, 0.15f, 0.15f, 1f); // Red
+            else if (pct < 75) textCol = new Color(0.85f, 0.5f, 0f, 1f); // Orange
+
+            if (successRateGO != null)
             {
-                successRateText.color = colorMap.Evaluate(success);
+                SetLabelText(successRateGO, text, textCol, true);
             }
-            else
+            else if (successRateText != null)
             {
-                successRateText.color = Color.green;
+                successRateText.text = text;
+                successRateText.color = textCol;
             }
         }
 
         public static void SetMaxCashText(float maxSpend)
         {
-            if (maxCashText == null) return;
-            maxCashText.text = $"<b>Spend Limit: ${Mathf.RoundToInt(maxSpend)}</b>";
+            Color color = new Color(0.35f, 0.35f, 0.35f, 1f);
+            string text = $"Spend Limit: ${Mathf.RoundToInt(maxSpend)}";
+
+            if (maxCashGO != null)
+            {
+                SetLabelText(maxCashGO, text, color, false);
+            }
+            else if (maxCashText != null)
+            {
+                maxCashText.text = text;
+                maxCashText.color = color;
+            }
         }
 
         public static void SetInitialPriceText(float initialPrice, bool ppu = false)
         {
-            if (initialOfferText == null) return;
-            if (ppu)
+            Color color = new Color(0.35f, 0.35f, 0.35f, 1f);
+            string text = ppu ? $"Initial Offer ${Mathf.RoundToInt(initialPrice)} per Unit" : $"Initial Offer ${Mathf.RoundToInt(initialPrice)}";
+
+            if (initialOfferGO != null)
             {
-                initialOfferText.text = $"<b>Initial Offer: ${Mathf.RoundToInt(initialPrice)} per Unit</b>";
-                return;
+                SetLabelText(initialOfferGO, text, color, false);
             }
-            initialOfferText.text = $"<b>Initial Offer: ${Mathf.RoundToInt(initialPrice)}</b>";
+            else if (initialOfferText != null)
+            {
+                initialOfferText.text = text;
+                initialOfferText.color = color;
+            }
         }
 
         public static void SetFairPriceText(float fairPrice)
         {
             if (fairPriceText == null) return;
-            fairPriceText.text = $"<b>Price: ${Mathf.RoundToInt(fairPrice)} per Unit</b>";
+            fairPriceText.text = $"Price: ${Mathf.RoundToInt(fairPrice)} per Unit";
         }
 
         public static float CalculateSpendingLimits(Customer customer)
@@ -252,27 +394,35 @@ namespace BetterCounterOffer
 
         public static void UpdateSuccessRate(CounterofferInterface instance)
         {
-            if (instance == null || successRateText == null) return;
-            if (instance.conversation == null || instance.conversation.sender == null) return;
-            Customer customer = instance.conversation.sender.GetComponent<Customer>();
-            if (customer == null) return;
-
-            float currentPrice = instance.PriceSelector != null ? instance.PriceSelector.SelectedAmount : 0f;
-            float probability = CalculateSuccessProbability(customer, instance.selectedProduct, instance.quantity, currentPrice);
-            SetSuccessRateText(probability);
+            UpdateAllLabels(instance);
         }
 
         public static void InitOnWake()
         {
-            Utility.Log("Initializing Counter Offer UI");
         }
 
-        private static void UpdateSelectorUI(Transform parent)
+        private static void UpdateSelectorUI(CounterofferInterface instance)
         {
-            if (offerInterface != null && offerInterface.ProductSelector != null)
+            if (instance == null || instance.ProductSelector == null) return;
+
+            Transform selectorTrans = instance.ProductSelector.transform;
+            selectorInterface = instance.ProductSelector;
+
+            if (selectorTabControl != null && selectorTabControl.filterbuttons != null)
             {
-                selectorInterface = offerInterface.ProductSelector;
+                try { UnityEngine.Object.Destroy(selectorTabControl.filterbuttons); } catch { }
+                selectorTabControl = null;
             }
+
+            selectorTabControl = new TabController(selectorTrans);
+            if (gameFont != null)
+            {
+                selectorTabControl.font = gameFont;
+            }
+            selectorTabControl.AddTab("Favorites", "Fave");
+            selectorTabControl.AddTab("Listed", "Listed");
+            selectorTabControl.AddTab("Discovered", "All");
+            selectorTabControl.SetSelected(currTab);
         }
 
         public static void TabSelected(Tab selected)
@@ -284,58 +434,70 @@ namespace BetterCounterOffer
             }
         }
 
-        private static void CreateLabels(Transform parent)
+        private static void SetupFullWidthLayout(GameObject go)
         {
-            if (offerInterface != null && offerInterface.TitleLabel != null)
+            if (go == null) return;
+            RectTransform rect = go.GetComponent<RectTransform>();
+            if (rect != null)
             {
-                gameFont = offerInterface.TitleLabel.font;
+                rect.anchorMin = new Vector2(0f, 0f);
+                rect.anchorMax = new Vector2(1f, 1f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.offsetMin = new Vector2(0f, 0f);
+                rect.offsetMax = new Vector2(0f, 0f);
             }
-
-            offerInfoGO = new GameObject("OfferInformation");
-            offerInfoGO.transform.SetParent(parent, false);
-            
-            var rect = offerInfoGO.AddComponent<RectTransform>();
-            rect.anchoredPosition = new Vector2(-280f, 0f);
-            rect.anchorMin = new Vector2(0, 0.5f);
-            rect.anchorMax = new Vector2(0, 0.5f);
-            rect.pivot = new Vector2(1f, 0.5f);
-            rect.sizeDelta = new Vector2(250, 150);
-
-            float startPosition = 40f;
-            if (initialOfferText == null && !CounterOfferConfig.disableInitialOffer)
-            {
-                initialOfferText = CreateLabel(offerInfoGO.transform, "InitialCash", "Initial Offer: $0", new Vector3(0, startPosition, 0));
-                startPosition -= 35f;
-            }
-
-            if (maxCashText == null && !CounterOfferConfig.disableMaxLimit)
-            {
-                maxCashText = CreateLabel(offerInfoGO.transform, "MaxCash", "Spend Limit: $0", new Vector3(0, startPosition, 0));
-                startPosition -= 35f;
-            }
-
-            if (successRateText == null && !CounterOfferConfig.disableSuccessRate)
-            {
-                successRateText = CreateLabel(offerInfoGO.transform, "SuccessRate", "100% Chance of Success", new Vector3(0, startPosition, 0));
-                startPosition -= 35f;
-            }
+            var layout = go.GetComponent<LayoutElement>();
+            if (layout == null) layout = go.AddComponent<LayoutElement>();
+            layout.minHeight = 24f;
+            layout.preferredHeight = 24f;
+            layout.flexibleWidth = 1f;
         }
 
-        public static Text CreateLabel(Transform parent, string title, string text, Vector3 localPosition)
+        private static void CreateLabelsCloned(CounterofferInterface instance, Transform cardContainer)
         {
-            GameObject labelGo = new GameObject(title);
-            labelGo.transform.SetParent(parent, false);
-            labelGo.transform.localPosition = localPosition;
-            Text textLabel = labelGo.AddComponent<Text>();
-            textLabel.text = text;
-            textLabel.font = gameFont != null ? gameFont : Resources.GetBuiltinResource<Font>("Arial.ttf");
-            textLabel.fontSize = 22;
-            textLabel.color = Color.white;
-            textLabel.alignment = TextAnchor.MiddleRight;
-            RectTransform labelRect = labelGo.transform.GetComponent<RectTransform>();
-            if (labelRect != null) labelRect.sizeDelta = new Vector2(250, 30);
+            if (instance == null || cardContainer == null) return;
 
-            return textLabel;
+            GameObject templateGO = null;
+            Transform subtitleTrans = cardContainer.Find("Customer/Subtitle");
+            if (subtitleTrans != null)
+            {
+                templateGO = subtitleTrans.gameObject;
+            }
+            if (templateGO == null && instance.TitleLabel != null) templateGO = instance.TitleLabel.gameObject;
+            if (templateGO == null && instance.FairPriceLabel != null) templateGO = instance.FairPriceLabel.gameObject;
+            if (templateGO == null) return;
+
+            Transform headerTrans = cardContainer.Find("Header");
+            int targetIndex = (headerTrans != null) ? headerTrans.GetSiblingIndex() + 1 : 3;
+
+            Color subLabelColor = new Color(0.35f, 0.35f, 0.35f, 1f);
+
+            if (!CounterOfferConfig.disableInitialOffer)
+            {
+                initialOfferGO = UnityEngine.Object.Instantiate(templateGO, cardContainer);
+                initialOfferGO.name = "ModInitialCash";
+                initialOfferGO.transform.SetSiblingIndex(targetIndex++);
+                SetupFullWidthLayout(initialOfferGO);
+                SetLabelText(initialOfferGO, "Initial Offer $0", subLabelColor, false);
+            }
+
+            if (!CounterOfferConfig.disableMaxLimit)
+            {
+                maxCashGO = UnityEngine.Object.Instantiate(templateGO, cardContainer);
+                maxCashGO.name = "ModMaxCash";
+                maxCashGO.transform.SetSiblingIndex(targetIndex++);
+                SetupFullWidthLayout(maxCashGO);
+                SetLabelText(maxCashGO, "Spend Limit: $0", subLabelColor, false);
+            }
+
+            if (!CounterOfferConfig.disableSuccessRate)
+            {
+                successRateGO = UnityEngine.Object.Instantiate(templateGO, cardContainer);
+                successRateGO.name = "ModSuccessRate";
+                successRateGO.transform.SetSiblingIndex(targetIndex++);
+                SetupFullWidthLayout(successRateGO);
+                SetLabelText(successRateGO, "100% Chance of Success", new Color(0f, 0.75f, 0.15f, 1f), true);
+            }
         }
     }
 }

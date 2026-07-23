@@ -40,15 +40,7 @@ namespace BetterCounterOffer
 
             if (CounterOfferUI.offerInterface != null && CounterOfferUI.offerInterface.PriceSelector == __instance)
             {
-                if (!CounterOfferConfig.disableSuccessRate)
-                {
-                    CounterOfferUI.UpdateSuccessRate(CounterOfferUI.offerInterface);
-                }
-
-                if (CounterOfferConfig.enablePricePerUnit && CounterOfferUI.offerInterface.quantity > 0)
-                {
-                    CounterOfferUI.SetFairPriceText(__instance.SelectedAmount / CounterOfferUI.offerInterface.quantity);
-                }
+                CounterOfferUI.UpdateAllLabels(CounterOfferUI.offerInterface);
             }
         }
     }
@@ -94,22 +86,10 @@ namespace BetterCounterOffer
         {
             if (CounterOfferUI.isUpdatingPrice) return;
 
-            if (__instance != null && __instance.PriceSelector != null && __instance.conversation != null && __instance.conversation.sender != null)
+            if (__instance != null)
             {
-                Customer customer = __instance.conversation.sender.GetComponent<Customer>();
-                if (customer != null)
-                {
-                    float maxSpend = CounterOfferUI.CalculateSpendingLimits(customer);
-                    if (maxSpend > 0)
-                    {
-                        CounterOfferUI.SetPriceSafely(__instance, maxSpend);
-                    }
-                }
-            }
-
-            if (!CounterOfferConfig.disableSuccessRate)
-            {
-                CounterOfferUI.UpdateSuccessRate(__instance);
+                // Only update labels, do NOT reset user price to max spend when changing quantity!
+                CounterOfferUI.UpdateAllLabels(__instance);
             }
         }
     }
@@ -121,22 +101,10 @@ namespace BetterCounterOffer
         {
             if (CounterOfferUI.isUpdatingPrice) return;
 
-            if (__instance != null && __instance.PriceSelector != null && __instance.conversation != null && __instance.conversation.sender != null)
+            if (__instance != null)
             {
-                Customer customer = __instance.conversation.sender.GetComponent<Customer>();
-                if (customer != null)
-                {
-                    float maxSpend = CounterOfferUI.CalculateSpendingLimits(customer);
-                    if (maxSpend > 0)
-                    {
-                        CounterOfferUI.SetPriceSafely(__instance, maxSpend);
-                    }
-                }
-            }
-
-            if (!CounterOfferConfig.disableSuccessRate)
-            {
-                CounterOfferUI.UpdateSuccessRate(__instance);
+                // Only update labels, do NOT reset user price to max spend when changing product!
+                CounterOfferUI.UpdateAllLabels(__instance);
             }
         }
     }
@@ -146,9 +114,9 @@ namespace BetterCounterOffer
     {
         public static void Postfix(CounterofferInterface __instance)
         {
-            if (CounterOfferConfig.enablePricePerUnit && __instance.PriceSelector != null)
+            if (__instance != null)
             {
-                CounterOfferUI.SetFairPriceText(__instance.PriceSelector.SelectedAmount);
+                CounterOfferUI.UpdateAllLabels(__instance);
             }
         }
     }
@@ -189,14 +157,20 @@ namespace BetterCounterOffer
             if (searchTerm.ToLower().Contains("coke")) { drugTypes.Add(EDrugType.Cocaine); }
             if (searchTerm.ToLower().Contains("meth")) { drugTypes.Add(EDrugType.Methamphetamine); }
 
-            foreach (ProductDefinition p in lp)
+            foreach (ProductDefinition pd in lp)
             {
-                if (drugTypes.Contains(p.DrugType) || p.Name.ToLower().Contains(searchTerm))
+                if (searchTerm.Length > 0)
                 {
-                    newList.Add(p);
+                    if (pd.Name.ToLower().Contains(searchTerm.ToLower()) || drugTypes.Contains(pd.DrugType))
+                    {
+                        newList.Add(pd);
+                    }
+                }
+                else
+                {
+                    newList.Add(pd);
                 }
             }
-
             __result = newList;
         }
     }
