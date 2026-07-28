@@ -54,6 +54,7 @@ namespace BetterCounterOffer
 
         public static bool isUpdatingPrice = false;
         public static int labelCount = 0;
+        public static float capturedInitialPrice = 0f;
 
         public static void SetPriceSafely(CounterofferInterface instance, float newPrice)
         {
@@ -126,7 +127,7 @@ namespace BetterCounterOffer
                 Transform found = parent.Find(name);
                 if (found != null)
                 {
-                    try { UnityEngine.Object.Destroy(found.gameObject); } catch { }
+                    try { UnityEngine.Object.DestroyImmediate(found.gameObject); } catch { }
                 }
             }
             initialOfferGO = null;
@@ -147,24 +148,44 @@ namespace BetterCounterOffer
                 ? instance.conversation.sender.GetComponent<Customer>() 
                 : null;
 
-            // 1. Capture customer's TRUE initial offer price BEFORE HighBaller auto-fills the price box!
+            // 1. Capture customer's TRUE initial offer price BEFORE auto-filling!
             float initialPrice = 0f;
+            int baseQuantity = 1;
             if (currCustomer != null && currCustomer.OfferedContractInfo != null)
             {
                 initialPrice = currCustomer.OfferedContractInfo.Payment;
+                if (currCustomer.OfferedContractInfo.Products != null && currCustomer.OfferedContractInfo.Products.entries.Count > 0)
+                {
+                    baseQuantity = Math.Max(1, currCustomer.OfferedContractInfo.Products.entries[0].Quantity);
+                }
             }
             if (initialPrice <= 0f && instance.PriceSelector != null)
             {
                 initialPrice = instance.PriceSelector.SelectedAmount;
             }
+            if (baseQuantity <= 0) baseQuantity = instance.quantity > 0 ? instance.quantity : 1;
+            capturedInitialPrice = initialPrice;
 
-            // 2. HighBaller auto-fills price box with customer's spending limit
-            if (currCustomer != null && instance.PriceSelector != null)
+            // 2. Calculate optimal (quantity, price) combo for Max 100% Success Payout
+            if (currCustomer != null && instance.PriceSelector != null && instance.selectedProduct != null)
             {
                 float maxSpend = CalculateSpendingLimits(currCustomer);
                 if (maxSpend > 0)
                 {
-                    SetPriceSafely(instance, maxSpend);
+                    int bestQuantity;
+                    float bestPrice;
+                    FindOptimal100PercentDeal(currCustomer, instance.selectedProduct, baseQuantity, maxSpend, out bestQuantity, out bestPrice);
+
+                    if (bestPrice > 0f)
+                    {
+                        SetQuantitySafely(instance, bestQuantity);
+                        SetPriceSafely(instance, bestPrice);
+                    }
+                    else
+                    {
+                        int safeMaxSpend = Mathf.FloorToInt(maxSpend - 0.0001f);
+                        SetPriceSafely(instance, safeMaxSpend);
+                    }
                 }
             }
 
@@ -179,8 +200,8 @@ namespace BetterCounterOffer
                 ? instance.conversation.sender.GetComponent<Customer>() 
                 : null;
 
-            float initialPrice = 0f;
-            if (currCustomer != null && currCustomer.OfferedContractInfo != null)
+            float initialPrice = capturedInitialPrice;
+            if (initialPrice <= 0f && currCustomer != null && currCustomer.OfferedContractInfo != null)
             {
                 initialPrice = currCustomer.OfferedContractInfo.Payment;
             }
@@ -294,7 +315,8 @@ namespace BetterCounterOffer
         public static void SetMaxCashText(float maxSpend)
         {
             Color color = new Color(0.35f, 0.35f, 0.35f, 1f);
-            string text = $"Spend Limit: ${Mathf.RoundToInt(maxSpend)}";
+            int safeMax = Mathf.FloorToInt(maxSpend - 0.0001f);
+            string text = $"Spend Limit: ${safeMax}";
 
             if (maxCashGO != null)
             {
@@ -390,6 +412,96 @@ namespace BetterCounterOffer
 
             float probability = (0.9f + num10 - num9) / 0.9f;
             return Mathf.Clamp(probability, 0f, 1f);
+        }
+
+        public static void SetQuantitySafely(CounterofferInterface instance, int targetQuantity)
+        {
+            if (instance == null || targetQuantity <= 0) return;
+            try
+            {
+                float change = targetQuantity - instance.quantity;
+                if (Mathf.Abs(change) > 0.001f)
+                {
+                    instance.ChangeQuantity(change);
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"Error setting quantity safely: {ex.Message}");
+            }
+        }
+
+        public static float FindMax100PercentPriceForQuantity(Customer customer, ProductDefinition product, int quantity, float maxSpend)
+        {
+            if (customer == null || product == null || quantity <= 0) return 0f;
+            int low = 1;
+            int high = Mathf.FloorToInt(maxSpend - 0.0001f);
+            int best100Price = 0;
+
+            while (low <= high)
+            {
+                int mid = (low + high) / 2;
+                float prob = CalculateSuccessProbability(customer, product, quantity, mid);
+                if (prob >= 0.999f)
+                {
+                    best100Price = mid;
+                    low = mid + 1;
+                }
+                else
+                {
+                    high = mid - 1;
+                }
+            }
+
+            return best100Price;
+        }
+
+        public static void FindOptimal100PercentDeal(Customer customer, ProductDefinition product, int baseQuantity, float maxSpend, out int bestQuantity, out float bestPrice)
+        {
+            bestQuantity = baseQuantity > 0 ? baseQuantity : 1;
+            bestPrice = 0f;
+            float maxRevenue = -1f;
+
+            int minQ = 1;
+            int maxQ = Math.Max(10, baseQuantity + 5);
+
+            for (int q = minQ; q <= maxQ; q++)
+            {
+                float p = FindMax100PercentPriceForQuantity(customer, product, q, maxSpend);
+                if (p > maxRevenue && p > 0f)
+                {
+                    maxRevenue = p;
+                    bestQuantity = q;
+                    bestPrice = p;
+                }
+            }
+
+            if (bestPrice <= 0f)
+            {
+                bestQuantity = baseQuantity > 0 ? baseQuantity : 1;
+                bestPrice = FindMax100PercentPriceForQuantity(customer, product, bestQuantity, maxSpend);
+            }
+        }
+
+        public static void AutoSet100PercentPriceForCurrentState(CounterofferInterface instance)
+        {
+            if (instance == null || isUpdatingPrice) return;
+            Customer currCustomer = (instance.conversation != null && instance.conversation.sender != null) 
+                ? instance.conversation.sender.GetComponent<Customer>() 
+                : null;
+
+            if (currCustomer != null && instance.selectedProduct != null && instance.quantity > 0)
+            {
+                float maxSpend = CalculateSpendingLimits(currCustomer);
+                if (maxSpend > 0)
+                {
+                    float max100Price = FindMax100PercentPriceForQuantity(currCustomer, instance.selectedProduct, instance.quantity, maxSpend);
+                    if (max100Price > 0f)
+                    {
+                        SetPriceSafely(instance, max100Price);
+                    }
+                }
+            }
         }
 
         public static void UpdateSuccessRate(CounterofferInterface instance)

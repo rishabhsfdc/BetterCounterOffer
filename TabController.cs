@@ -113,7 +113,16 @@ namespace BetterCounterOffer
             buttonTextGo.transform.SetParent(buttonGo.transform, false);
             Text buttonText = buttonTextGo.AddComponent<Text>();
             buttonText.text = text;
-            buttonText.font = font != null ? font : Resources.GetBuiltinResource<Font>("Arial.ttf");
+            Font fallbackFont = font;
+            if (fallbackFont == null)
+            {
+                try { fallbackFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"); } catch { }
+            }
+            if (fallbackFont == null)
+            {
+                try { fallbackFont = Font.CreateDynamicFontFromOSFont("Arial", 13); } catch { }
+            }
+            buttonText.font = fallbackFont;
             buttonText.fontSize = 13;
             buttonText.color = textDisabled;
             buttonText.alignment = TextAnchor.MiddleCenter;

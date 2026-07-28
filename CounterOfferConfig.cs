@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using MelonLoader;
 
 namespace BetterCounterOffer
@@ -38,6 +38,7 @@ namespace BetterCounterOffer
                 if (isConfigSetting)
                 {
                     var pair = line.Split('=');
+                    if (pair.Length < 2) continue;
                     string key = pair[0].Trim();
                     string rawValue = pair[1].Trim();
                     bool value;

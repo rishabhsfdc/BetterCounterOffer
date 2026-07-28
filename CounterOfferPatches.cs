@@ -88,7 +88,7 @@ namespace BetterCounterOffer
 
             if (__instance != null)
             {
-                // Only update labels, do NOT reset user price to max spend when changing quantity!
+                CounterOfferUI.AutoSet100PercentPriceForCurrentState(__instance);
                 CounterOfferUI.UpdateAllLabels(__instance);
             }
         }
@@ -103,7 +103,7 @@ namespace BetterCounterOffer
 
             if (__instance != null)
             {
-                // Only update labels, do NOT reset user price to max spend when changing product!
+                CounterOfferUI.AutoSet100PercentPriceForCurrentState(__instance);
                 CounterOfferUI.UpdateAllLabels(__instance);
             }
         }
@@ -136,7 +136,7 @@ namespace BetterCounterOffer
     [HarmonyPatch(typeof(CounterOfferProductSelector), nameof(CounterOfferProductSelector.GetMatchingProducts))]
     static class CounterOfferProductSelectorGetMatchingProductsPatch
     {
-        public static void Postfix(CounterofferInterface __instance, ref GenericCol.List<ProductDefinition> __result, ref string searchTerm)
+        public static void Postfix(CounterOfferProductSelector __instance, ref GenericCol.List<ProductDefinition> __result, ref string searchTerm)
         {
             HashSet<EDrugType> drugTypes = new HashSet<EDrugType>();
             GenericCol.List<ProductDefinition> lp;
@@ -152,16 +152,21 @@ namespace BetterCounterOffer
             {
                 lp = ProductManager.DiscoveredProducts;
             }
+
+            if (lp == null) return;
+
             GenericCol.List<ProductDefinition> newList = new GenericCol.List<ProductDefinition>();
-            if (searchTerm.ToLower().Contains("weed")) { drugTypes.Add(EDrugType.Marijuana); }
-            if (searchTerm.ToLower().Contains("coke")) { drugTypes.Add(EDrugType.Cocaine); }
-            if (searchTerm.ToLower().Contains("meth")) { drugTypes.Add(EDrugType.Methamphetamine); }
+            string term = searchTerm != null ? searchTerm.ToLower() : string.Empty;
+            if (term.Contains("weed")) { drugTypes.Add(EDrugType.Marijuana); }
+            if (term.Contains("coke")) { drugTypes.Add(EDrugType.Cocaine); }
+            if (term.Contains("meth")) { drugTypes.Add(EDrugType.Methamphetamine); }
 
             foreach (ProductDefinition pd in lp)
             {
-                if (searchTerm.Length > 0)
+                if (pd == null) continue;
+                if (term.Length > 0)
                 {
-                    if (pd.Name.ToLower().Contains(searchTerm.ToLower()) || drugTypes.Contains(pd.DrugType))
+                    if ((pd.Name != null && pd.Name.ToLower().Contains(term)) || drugTypes.Contains(pd.DrugType))
                     {
                         newList.Add(pd);
                     }
